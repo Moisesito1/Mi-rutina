@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0D0D12" />
+  <title>Mi Rutina</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { background: #0D0D12; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    input, select, button { font-family: inherit; }
+    input::placeholder { color: #42404F; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script type="text/babel">
+const { useState, useEffect } = React;
+
+function load(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+}
+function save(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+function todayKey() { return new Date().toISOString().split("T")[0]; }
+function fmt(dateStr) {
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+}
+function todayDayName() {
+  return new Date().toLocaleDateString("es-ES", { weekday: "long" });
+}
+
+const DEFAULT_EXERCISES = [
+  { name: "Sentadillas Búlgaras",                 band: false },
+  { name: "Zancadas con mancuernas",              band: false },
+  { name: "Sentadillas con banda elástica",       band: true  },
+  { name: "Remo sentado con banda elástica",      band: true  },
+  { name: "Remo de pie con banda elástica",       band: true  },
+  { name: "Flexiones de brazos",                  band: false },
+  { name: "Tríceps con banda elástica",           band: true  },
+  { name: "Bíceps con mancuernas",                band: false },
+  { name: "Press militar con banda elástica",     band: true  },
+  { name: "Puente de glúteos con banda elástica", band: true  },
+];
+
+const BAND_COLORS = ["Amarilla", "Verde", "Roja", "Azul", "Negra", "Morada"];
+const DAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+const T = {
+  bg: "#0D0D12", surface: "#16161F", surface2: "#1E1E2A", border: "#252535",
+  accent: { gym: "#C8FF3E", med: "#9B8FFF", book: "#FF9F5A" },
+  text: { primary: "#F2F0FF", secondary: "#7A788F", muted: "#42404F" },
+};
+
+function TabBar({ active, onChange }) {
+  const tabs = [
+    { id: "gym", icon: "💪", label: "Fuerza" },
+    { id: "med", icon: "🧘", label: "Meditación" },
+    { id: "book", icon: "📖", label: "Lectura" },
+  ];
+  return (
+    <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: T.surface, borderTop: `1px solid ${T.border}`, display: "flex", zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 16px)" }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onChange(t.id)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer", padding: "12px 0 4px", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: active === t.id ? T.accent[t.id] : T.text.secondary }}>
+          <span style={{ fontSize: 22 }}>{t.icon}</span>
+          <span style={{ fontSize: 10, fontWeight: active === t.id ? 700 : 400 }}>{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Card({ children, style, onClick }) {
+  return <div onClick={onClick} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "16px 18px", cursor: onClick ? "pointer" : undefined, ...style }}>{children}</div>;
+}
+
+function Pill({ color, children }) {
+  return <span style={{ background: color + "22", color, border: `1px solid ${color}44`, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 600 }}>{children}</span>;
+}
+
+function Input({ value, onChange, placeholder, type = "text", style }) {
+  return <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text.primary, fontSize: 15, outline: "none", width: "100%", boxSizing: "border-box", ...style }} />;
+}
+
+function Btn({ children, onClick, color = T.accent.gym, secondary, style }) {
+  return <button onClick={onClick} style={{ background: secondary ? "transparent" : color, border: `1.5px solid ${color}`, color: secondary ? color : "#000", borderRadius: 12, padding: "10px 18px", fontWeight: 700, fontSize: 14, cursor: "pointer", ...style }}>{children}</button>;
+}
+
+function BackBtn({ onClick }) {
+  return <button onClick={onClick} style={{ background: T.surface2, border: `1.5px solid ${T.border}`, color: T.text.primary, borderRadius: 10, cursor: "pointer", fontSize: 14, padding: "8px 16px", display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 16, fontWeight: 600 }}>← Volver</button>;
+}
+
+// ── PLANNING ─────────────────────────────────────────────────────
+function PlanningView({ plan, setPlan, exercises, setExercises, onBack }) {
+  const accentG = T.accent.gym;
+  const [selectedDay, setSelectedDay] = useState(DAYS[0]);
+  const [customName, setCustomName] = useState("");
+  const [customBand, setCustomBand] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const trainingDays = DAYS.filter(d => plan[d] && plan[d].length > 0);
+
+  function addCustomExercise() {
+    const name = customName.trim();
+    if (!name) return;
+    if (!exercises.find(e => e.name === name)) setExercises(prev => [...prev, { name, band: customBand }]);
+    setPlan(prev => {
+      const current = prev[selectedDay] || [];
+      if (current.includes(name)) return prev;
+      return { ...prev, [selectedDay]: [...current, name] };
+    });
+    setCustomName(""); setCustomBand(false); setShowAddForm(false);
+  }
+
+  function toggleExercise(exName) {
+    setPlan(prev => {
+      const current = prev[selectedDay] || [];
+      const updated = current.includes(exName) ? current.filter(e => e !== exName) : [...current, exName];
+      return { ...prev, [selectedDay]: updated };
+    });
+  }
+
+  const dayPlan = plan[selectedDay] || [];
+
+  return (
+    <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+      <BackBtn onClick={onBack} />
+      <h2 style={{ margin: "0 0 6px", fontSize: 22, color: T.text.primary }}>Planificación semanal</h2>
+      <p style={{ margin: "0 0 20px", fontSize: 13, color: T.text.secondary }}>Elige qué días entrenas y qué ejercicios haces.</p>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 20, overflowX: "auto", paddingBottom: 4 }}>
+        {DAYS.map(day => {
+          const hasEx = (plan[day] || []).length > 0;
+          const isSel = selectedDay === day;
+          return (
+            <button key={day} onClick={() => setSelectedDay(day)} style={{ flexShrink: 0, background: isSel ? accentG : hasEx ? accentG+"22" : T.surface2, border: `1.5px solid ${isSel ? accentG : hasEx ? accentG+"88" : T.border}`, color: isSel ? "#000" : hasEx ? accentG : T.text.secondary, borderRadius: 10, padding: "8px 12px", fontWeight: isSel ? 700 : 500, fontSize: 13, cursor: "pointer" }}>
+              {day.slice(0, 3)}{hasEx && !isSel ? " ●" : ""}
+            </button>
+          );
+        })}
+      </div>
+
+      {showAddForm ? (
+        <Card style={{ marginBottom: 14, border: `1.5px solid ${accentG}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.text.secondary }}>Nuevo ejercicio</span>
+            <button onClick={() => { setShowAddForm(false); setCustomName(""); }} style={{ background: "none", border: "none", color: T.text.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
+          </div>
+          <input value={customName} onChange={e => setCustomName(e.target.value)} placeholder="Nombre del ejercicio…" style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text.primary, fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 12 }} />
+          <div style={{ fontSize: 12, color: T.text.secondary, marginBottom: 8 }}>Tipo de carga</div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <button onClick={() => setCustomBand(false)} style={{ flex: 1, padding: "10px", borderRadius: 10, cursor: "pointer", background: !customBand ? accentG+"22" : T.surface2, border: `1.5px solid ${!customBand ? accentG : T.border}`, color: !customBand ? accentG : T.text.secondary, fontWeight: 600, fontSize: 13 }}>🏋️ Kg</button>
+            <button onClick={() => setCustomBand(true)} style={{ flex: 1, padding: "10px", borderRadius: 10, cursor: "pointer", background: customBand ? accentG+"22" : T.surface2, border: `1.5px solid ${customBand ? accentG : T.border}`, color: customBand ? accentG : T.text.secondary, fontWeight: 600, fontSize: 13 }}>🎀 Banda</button>
+          </div>
+          <button onClick={addCustomExercise} style={{ width: "100%", background: accentG, border: "none", borderRadius: 10, color: "#000", fontWeight: 700, fontSize: 14, padding: "12px", cursor: "pointer" }}>Guardar ejercicio</button>
+        </Card>
+      ) : (
+        <button onClick={() => setShowAddForm(true)} style={{ width: "100%", background: "transparent", border: `1.5px dashed ${accentG}88`, borderRadius: 10, color: accentG, fontWeight: 600, fontSize: 14, padding: "10px", cursor: "pointer", marginBottom: 14 }}>+ Crear ejercicio nuevo</button>
+      )}
+
+      <div style={{ fontSize: 12, color: T.text.secondary, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>{selectedDay} — {dayPlan.length} ejercicios</div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
+        {exercises.map(ex => {
+          const active = dayPlan.includes(ex.name);
+          return (
+            <div key={ex.name} onClick={() => toggleExercise(ex.name)} style={{ background: active ? accentG+"18" : T.surface, border: `1.5px solid ${active ? accentG : T.border}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: active ? accentG : T.text.primary }}>{ex.name}</div>
+                <div style={{ fontSize: 11, color: T.text.muted, marginTop: 2 }}>{ex.band ? "🎀 Banda" : "🏋️ Kg"}</div>
+              </div>
+              <div style={{ width: 24, height: 24, borderRadius: "50%", background: active ? accentG : T.surface2, border: `2px solid ${active ? accentG : T.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#000", flexShrink: 0 }}>
+                {active ? "✓" : ""}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {trainingDays.length > 0 && (
+        <Card>
+          <div style={{ fontSize: 12, color: T.text.secondary, letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>Resumen semanal</div>
+          {trainingDays.map(day => (
+            <div key={day} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: accentG, marginBottom: 4 }}>{day}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {(plan[day] || []).map(ex => (
+                  <span key={ex} style={{ fontSize: 11, background: T.surface2, borderRadius: 6, padding: "3px 8px", color: T.text.secondary }}>{ex}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── GYM ──────────────────────────────────────────────────────────
+function GymModule() {
+  const [sessions, setSessions]     = useState(() => load("gym_sessions", []));
+  const [plan, setPlan]             = useState(() => load("gym_plan", {}));
+  const [exercises, setExercises]   = useState(() => load("gym_exercises", DEFAULT_EXERCISES));
+  const [view, setView]             = useState("history");
+  const [detailSession, setDetailSession] = useState(null);
+  const [sessionExercises, setSessionExercises] = useState([]);
+  const [showExPicker, setShowExPicker] = useState(false);
+  const [customEx, setCustomEx]     = useState("");
+  const [customExBand, setCustomExBand] = useState(false);
+  const [sessionNote, setSessionNote] = useState("");
+
+  useEffect(() => { save("gym_sessions", sessions); }, [sessions]);
+  useEffect(() => { save("gym_plan", plan); }, [plan]);
+  useEffect(() => { save("gym_exercises", exercises); }, [exercises]);
+
+  const accentG = T.accent.gym;
+  const dayName = todayDayName();
+  const capitalDay = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+  const todayPlan = plan[capitalDay] || [];
+
+  function startSession(preload = []) {
+    const initial = preload.map(name => {
+      const ex = exercises.find(e => e.name === name);
+      return { id: Date.now() + Math.random(), name, band: ex?.band || false, sets: [{ reps: "", value: "" }] };
+    });
+    setSessionExercises(initial);
+    setSessionNote(""); setShowExPicker(false); setCustomEx(""); setCustomExBand(false);
+    setView("active");
+  }
+
+  function addExerciseToSession(name) {
+    const ex = exercises.find(e => e.name === name);
+    setSessionExercises(prev => [...prev, { id: Date.now(), name, band: ex?.band || false, sets: [{ reps: "", value: "" }] }]);
+    setShowExPicker(false); setCustomEx("");
+  }
+
+  function addCustomExerciseToSession(name, band) {
+    if (!exercises.find(e => e.name === name)) setExercises(prev => [...prev, { name, band }]);
+    setSessionExercises(prev => [...prev, { id: Date.now(), name, band, sets: [{ reps: "", value: "" }] }]);
+    setShowExPicker(false); setCustomEx(""); setCustomExBand(false);
+  }
+
+  function updateSet(exId, sIdx, field, val) {
+    setSessionExercises(prev => prev.map(ex => ex.id !== exId ? ex : { ...ex, sets: ex.sets.map((s, i) => i !== sIdx ? s : { ...s, [field]: val }) }));
+  }
+  function addSet(exId) {
+    setSessionExercises(prev => prev.map(ex => ex.id !== exId ? ex : { ...ex, sets: [...ex.sets, { reps: "", value: "" }] }));
+  }
+  function removeSet(exId, sIdx) {
+    setSessionExercises(prev => prev.map(ex => ex.id !== exId ? ex : { ...ex, sets: ex.sets.filter((_, i) => i !== sIdx) }));
+  }
+  function removeExercise(exId) {
+    setSessionExercises(prev => prev.filter(ex => ex.id !== exId));
+  }
+  function saveSession() {
+    if (sessionExercises.length === 0) return;
+    setSessions(prev => [{ id: Date.now(), date: todayKey(), exercises: sessionExercises, note: sessionNote }, ...prev]);
+    setView("history");
+  }
+
+  if (view === "plan") return <PlanningView plan={plan} setPlan={setPlan} exercises={exercises} setExercises={setExercises} onBack={() => setView("history")} />;
+
+  if (view === "detail" && detailSession) return (
+    <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+      <BackBtn onClick={() => setView("history")} />
+      <div style={{ fontSize: 13, color: T.text.secondary, marginBottom: 4 }}>{fmt(detailSession.date)}</div>
+      <h2 style={{ margin: "0 0 20px", fontSize: 22, color: T.text.primary }}>Sesión de fuerza</h2>
+      {detailSession.exercises.map(ex => (
+        <Card key={ex.id} style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: accentG, marginBottom: 10 }}>{ex.name}{ex.band && <span style={{ fontSize: 11, color: T.text.muted, marginLeft: 8 }}>🎀</span>}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "28px 1fr 1fr", gap: 8, fontSize: 11, color: T.text.secondary, marginBottom: 6 }}><span>#</span><span>Reps</span><span>{ex.band ? "Banda" : "Kg"}</span></div>
+          {ex.sets.map((s, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr 1fr", gap: 8, marginBottom: 4 }}>
+              <span style={{ color: T.text.muted, fontSize: 12, textAlign: "center" }}>{i + 1}</span>
+              <span style={{ color: T.text.primary, fontSize: 15, fontWeight: 600 }}>{s.reps || "—"}</span>
+              <span style={{ color: T.text.primary, fontSize: 15, fontWeight: 600 }}>{s.value ? (ex.band ? s.value : s.value + " kg") : "—"}</span>
+            </div>
+          ))}
+        </Card>
+      ))}
+      {detailSession.note ? <Card><div style={{ fontSize: 11, color: T.text.secondary, marginBottom: 4 }}>NOTA</div><div style={{ fontSize: 14, color: T.text.primary }}>{detailSession.note}</div></Card> : null}
+    </div>
+  );
+
+  if (view === "active") return (
+    <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 22, color: accentG }}>Sesión en curso</h2>
+        <Btn onClick={() => setView("history")} secondary color="#E05C7A" style={{ padding: "8px 16px", fontSize: 13 }}>✕ Cancelar</Btn>
+      </div>
+
+      {showExPicker ? (
+        <Card style={{ marginBottom: 16, border: `1.5px solid ${accentG}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontWeight: 600, fontSize: 13, color: T.text.secondary }}>Selecciona ejercicio</span>
+            <button onClick={() => { setShowExPicker(false); setCustomEx(""); }} style={{ background: "none", border: "none", color: T.text.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <Input value={customEx} onChange={setCustomEx} placeholder="Nombre personalizado…" style={{ flex: 1 }} />
+            <Btn onClick={() => customEx.trim() && addCustomExerciseToSession(customEx.trim(), customExBand)} color={accentG} style={{ padding: "10px 12px", whiteSpace: "nowrap", fontSize: 13 }}>Añadir</Btn>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <button onClick={() => setCustomExBand(false)} style={{ flex: 1, padding: "8px", borderRadius: 8, cursor: "pointer", fontSize: 12, background: !customExBand ? accentG+"22" : T.surface2, border: `1.5px solid ${!customExBand ? accentG : T.border}`, color: !customExBand ? accentG : T.text.secondary, fontWeight: 600 }}>🏋️ Kg</button>
+            <button onClick={() => setCustomExBand(true)} style={{ flex: 1, padding: "8px", borderRadius: 8, cursor: "pointer", fontSize: 12, background: customExBand ? accentG+"22" : T.surface2, border: `1.5px solid ${customExBand ? accentG : T.border}`, color: customExBand ? accentG : T.text.secondary, fontWeight: 600 }}>🎀 Banda</button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+            {exercises.map(ex => (
+              <button key={ex.name} onClick={() => addExerciseToSession(ex.name)} style={{ background: T.surface2, border: `1px solid ${T.border}`, color: T.text.primary, borderRadius: 10, padding: "10px 14px", fontSize: 13, cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>{ex.name}</span>
+                <span style={{ fontSize: 11, color: T.text.muted }}>{ex.band ? "🎀" : "🏋️"}</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      ) : (
+        <Btn onClick={() => setShowExPicker(true)} color={accentG} secondary style={{ width: "100%", marginBottom: 16 }}>+ Añadir ejercicio</Btn>
+      )}
+
+      {sessionExercises.map(ex => (
+        <Card key={ex.id} style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div><span style={{ fontWeight: 700, fontSize: 14, color: accentG }}>{ex.name}</span>{ex.band && <span style={{ fontSize: 11, color: T.text.muted, marginLeft: 6 }}>🎀</span>}</div>
+            <button onClick={() => removeExercise(ex.id)} style={{ background: "none", border: "none", color: T.text.muted, cursor: "pointer", fontSize: 18 }}>✕</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "24px 1fr 1fr 24px", gap: 8, fontSize: 11, color: T.text.secondary, marginBottom: 6 }}>
+            <span>#</span><span>Reps</span><span>{ex.band ? "Color banda" : "Kg"}</span><span></span>
+          </div>
+          {ex.sets.map((s, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "24px 1fr 1fr 24px", gap: 8, marginBottom: 8, alignItems: "center" }}>
+              <span style={{ color: T.text.muted, fontSize: 12, textAlign: "center" }}>{i + 1}</span>
+              <Input value={s.reps} onChange={v => updateSet(ex.id, i, "reps", v)} placeholder="12" type="number" />
+              {ex.band ? (
+                <select value={s.value} onChange={e => updateSet(ex.id, i, "value", e.target.value)} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 8px", color: s.value ? T.text.primary : T.text.muted, fontSize: 13, outline: "none", width: "100%" }}>
+                  <option value="">Color…</option>
+                  {BAND_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              ) : (
+                <Input value={s.value} onChange={v => updateSet(ex.id, i, "value", v)} placeholder="kg" type="number" />
+              )}
+              <button onClick={() => removeSet(ex.id, i)} style={{ background: "none", border: "none", color: T.text.muted, cursor: "pointer", fontSize: 18 }}>−</button>
+            </div>
+          ))}
+          <Btn onClick={() => addSet(ex.id)} secondary color={accentG} style={{ width: "100%", padding: "8px", fontSize: 13 }}>+ Serie</Btn>
+        </Card>
+      ))}
+
+      <Input value={sessionNote} onChange={setSessionNote} placeholder="Nota opcional…" style={{ marginBottom: 16 }} />
+      <Btn onClick={saveSession} color={accentG} style={{ width: "100%", padding: "14px", fontSize: 16 }}>Guardar sesión ✓</Btn>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 12, color: T.text.secondary, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>Módulo</div>
+          <h2 style={{ margin: 0, fontSize: 26, color: T.text.primary, fontWeight: 800 }}>Fuerza 💪</h2>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn onClick={() => setView("plan")} secondary color={accentG} style={{ padding: "8px 12px", fontSize: 13 }}>📋 Plan</Btn>
+          <Btn onClick={() => startSession()} color={accentG} style={{ padding: "8px 14px", fontSize: 13 }}>+ Sesión</Btn>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
+        {[
+          { label: "Total", value: sessions.length },
+          { label: "Esta semana", value: sessions.filter(s => { const d = new Date(s.date+"T12:00:00"), now = new Date(), start = new Date(now); start.setDate(now.getDate()-now.getDay()+1); return d >= start; }).length },
+          { label: "Ejercicios", value: new Set(sessions.flatMap(s => s.exercises.map(e => e.name))).size },
+        ].map(stat => (
+          <Card key={stat.label} style={{ textAlign: "center", padding: "14px 8px" }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: accentG }}>{stat.value}</div>
+            <div style={{ fontSize: 11, color: T.text.secondary, marginTop: 2 }}>{stat.label}</div>
+          </Card>
+        ))}
+      </div>
+
+      {todayPlan.length > 0 && (
+        <Card style={{ marginBottom: 20, border: `1.5px solid ${accentG}55` }}>
+          <div style={{ fontSize: 11, color: accentG, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Plan de hoy · {capitalDay}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {todayPlan.map(ex => <span key={ex} style={{ fontSize: 12, background: accentG+"18", borderRadius: 6, padding: "4px 10px", color: accentG, fontWeight: 500 }}>{ex}</span>)}
+          </div>
+          <Btn onClick={() => startSession(todayPlan)} color={accentG} style={{ width: "100%", padding: "10px", fontSize: 14 }}>Empezar con el plan de hoy</Btn>
+        </Card>
+      )}
+
+      {sessions.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "60px 0", color: T.text.muted }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🏋️</div>
+          <div style={{ fontSize: 15 }}>Tu primera sesión te espera</div>
+          <div style={{ fontSize: 13, marginTop: 6 }}>Empieza configurando tu plan semanal</div>
+        </div>
+      ) : sessions.map(session => {
+        const totalSets = session.exercises.reduce((n, e) => n + e.sets.length, 0);
+        return (
+          <Card key={session.id} style={{ marginBottom: 12 }} onClick={() => { setDetailSession(session); setView("detail"); }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: T.text.primary }}>{fmt(session.date)}</div>
+              <Pill color={accentG}>{session.exercises.length} ejercicios</Pill>
+            </div>
+            <div style={{ fontSize: 13, color: T.text.secondary, marginBottom: 8 }}>{totalSets} series totales</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {session.exercises.slice(0, 4).map(ex => <span key={ex.id} style={{ fontSize: 12, background: T.surface2, borderRadius: 6, padding: "3px 8px", color: T.text.secondary }}>{ex.name}</span>)}
+              {session.exercises.length > 4 && <span style={{ fontSize: 12, color: T.text.muted }}>+{session.exercises.length - 4} más</span>}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── MEDITATION ────────────────────────────────────────────────────
+function MedModule() {
+  const [log, setLog]           = useState(() => load("med_log", {}));
+  const [duration, setDuration] = useState(() => load("med_duration", 10));
+  const [streak, setStreak]     = useState(0);
+
+  useEffect(() => { save("med_log", log); }, [log]);
+  useEffect(() => { save("med_duration", duration); }, [duration]);
+  useEffect(() => {
+    let s = 0; const today = new Date();
+    for (let i = 0; i < 365; i++) { const d = new Date(today); d.setDate(today.getDate()-i); if (log[d.toISOString().split("T")[0]]) s++; else break; }
+    setStreak(s);
+  }, [log]);
+
+  const today = todayKey(), doneTday = !!log[today], accentM = T.accent.med;
+
+  function toggle() {
+    setLog(prev => { const u = {...prev}; if (u[today]) delete u[today]; else u[today] = { ts: Date.now(), duration }; return u; });
+  }
+
+  const last14 = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate()-(13-i)); return d.toISOString().split("T")[0]; });
+
+  return (
+    <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontSize: 12, color: T.text.secondary, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>Módulo</div>
+        <h2 style={{ margin: 0, fontSize: 26, color: T.text.primary, fontWeight: 800 }}>Meditación 🧘</h2>
+      </div>
+      <div style={{ textAlign: "center", marginBottom: 32 }}>
+        <div onClick={toggle} style={{ width: 160, height: 160, borderRadius: "50%", background: doneTday ? accentM : T.surface, border: `3px solid ${accentM}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", margin: "0 auto", cursor: "pointer", boxShadow: doneTday ? `0 0 40px ${accentM}55` : "none" }}>
+          <span style={{ fontSize: 48 }}>{doneTday ? "✓" : "🧘"}</span>
+          <span style={{ fontSize: 13, color: doneTday ? "#fff" : T.text.secondary, marginTop: 4, fontWeight: 600 }}>{doneTday ? "¡Hecho!" : "Marcar hoy"}</span>
+        </div>
+        <div style={{ marginTop: 20, fontSize: 13, color: T.text.secondary }}>Recordatorio a las <strong style={{ color: T.text.primary }}>12:00</strong></div>
+      </div>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 12, color: T.text.secondary, marginBottom: 12, letterSpacing: 1, textTransform: "uppercase" }}>Duración objetivo</div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          {[5, 10, 15, 20, 30].map(m => <button key={m} onClick={() => setDuration(m)} style={{ width: 48, height: 48, borderRadius: 12, background: duration===m ? accentM : T.surface2, border: `1.5px solid ${duration===m ? accentM : T.border}`, color: duration===m ? "#fff" : T.text.secondary, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>{m}</button>)}
+        </div>
+        <div style={{ textAlign: "center", marginTop: 8, fontSize: 12, color: T.text.muted }}>minutos</div>
+      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+        <Card style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 800, color: accentM }}>🔥 {streak}</div><div style={{ fontSize: 12, color: T.text.secondary, marginTop: 4 }}>días seguidos</div></Card>
+        <Card style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 800, color: accentM }}>{Object.keys(log).length}</div><div style={{ fontSize: 12, color: T.text.secondary, marginTop: 4 }}>sesiones totales</div></Card>
+      </div>
+      <Card>
+        <div style={{ fontSize: 12, color: T.text.secondary, marginBottom: 12, letterSpacing: 1, textTransform: "uppercase" }}>Últimas 2 semanas</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+          {last14.map(d => (
+            <div key={d} style={{ textAlign: "center" }}>
+              <div style={{ height: 36, borderRadius: 8, background: log[d] ? accentM : T.surface2, border: d===today ? `2px solid ${accentM}` : `1px solid ${T.border}`, marginBottom: 4 }} />
+              <div style={{ fontSize: 9, color: T.text.muted }}>{new Date(d+"T12:00:00").toLocaleDateString("es-ES", { weekday: "narrow" })}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── BOOKS ─────────────────────────────────────────────────────────
+function BookModule() {
+  const [books, setBooks]       = useState(() => load("books", []));
+  const [view, setView]         = useState("list");
+  const [selected, setSelected] = useState(null);
+  const [form, setForm]         = useState({ title: "", author: "", pages: "", period: "trimestre" });
+  const [newProgress, setNewProgress] = useState("");
+  const accentB = T.accent.book;
+
+  useEffect(() => { save("books", books); }, [books]);
+
+  function addBook() {
+    if (!form.title.trim()) return;
+    setBooks(prev => [...prev, { id: Date.now(), title: form.title.trim(), author: form.author.trim(), pages: parseInt(form.pages)||0, period: form.period, pct: 0, log: [], added: todayKey(), status: "reading" }]);
+    setForm({ title: "", author: "", pages: "", period: "trimestre" }); setView("list");
+  }
+
+  function updateProgress(bookId) {
+    const val = Math.min(100, Math.max(0, parseInt(newProgress)||0));
+    setBooks(prev => prev.map(b => b.id!==bookId ? b : { ...b, pct: val, log: [...b.log, { date: todayKey(), pct: val }], status: val===100 ? "done" : "reading" }));
+    setNewProgress("");
+  }
+
+  function deleteBook(id) { setBooks(prev => prev.filter(b => b.id!==id)); setView("list"); }
+
+  const reading = books.filter(b => b.status==="reading"), done = books.filter(b => b.status==="done");
+
+  if (view==="detail" && selected) {
+    const book = books.find(b => b.id===selected);
+    if (!book) { setView("list"); return null; }
+    return (
+      <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+        <BackBtn onClick={() => setView("list")} />
+        <Pill color={book.status==="done" ? accentB : T.text.secondary}>{book.status==="done" ? "✓ Terminado" : `Leyendo · ${book.period}`}</Pill>
+        <h2 style={{ margin: "10px 0 2px", fontSize: 22, color: T.text.primary }}>{book.title}</h2>
+        {book.author && <div style={{ fontSize: 14, color: T.text.secondary, marginBottom: 24 }}>{book.author}</div>}
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 13, color: T.text.secondary }}>Progreso</span><span style={{ fontSize: 20, fontWeight: 800, color: accentB }}>{book.pct}%</span></div>
+          <div style={{ height: 10, background: T.surface2, borderRadius: 6, overflow: "hidden" }}><div style={{ height: "100%", width: `${book.pct}%`, background: accentB, borderRadius: 6 }} /></div>
+          {book.pages>0 && <div style={{ fontSize: 12, color: T.text.muted, marginTop: 6 }}>~{Math.round(book.pages*book.pct/100)} de {book.pages} páginas</div>}
+        </Card>
+        {book.status!=="done" && (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: T.text.secondary, marginBottom: 10 }}>Actualizar progreso</div>
+            <div style={{ display: "flex", gap: 10 }}><Input value={newProgress} onChange={setNewProgress} placeholder="Porcentaje (0–100)" type="number" style={{ flex: 1 }} /><Btn onClick={() => updateProgress(book.id)} color={accentB} style={{ whiteSpace: "nowrap" }}>Guardar</Btn></div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>{[25,50,75,100].map(p => <button key={p} onClick={() => setNewProgress(String(p))} style={{ background: T.surface2, border: `1px solid ${T.border}`, color: T.text.secondary, borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer" }}>{p}%</button>)}</div>
+          </Card>
+        )}
+        {book.log.length>0 && (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: T.text.secondary, marginBottom: 10, letterSpacing: 1, textTransform: "uppercase" }}>Historial</div>
+            {[...book.log].reverse().map((entry,i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: i<book.log.length-1 ? `1px solid ${T.border}` : "none" }}><span style={{ fontSize: 13, color: T.text.secondary }}>{fmt(entry.date)}</span><span style={{ fontSize: 13, fontWeight: 700, color: accentB }}>{entry.pct}%</span></div>)}
+          </Card>
+        )}
+        <Btn onClick={() => deleteBook(book.id)} secondary color="#E05C7A" style={{ width: "100%" }}>Eliminar libro</Btn>
+      </div>
+    );
+  }
+
+  if (view==="add") return (
+    <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+      <BackBtn onClick={() => setView("list")} />
+      <h2 style={{ margin: "0 0 24px", fontSize: 22, color: T.text.primary }}>Añadir libro</h2>
+      {[{ key:"title", label:"TÍTULO *", placeholder:"El nombre del viento" }, { key:"author", label:"AUTOR", placeholder:"Patrick Rothfuss" }, { key:"pages", label:"PÁGINAS (opcional)", placeholder:"662", type:"number" }].map(f => (
+        <div key={f.key} style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: T.text.secondary, letterSpacing: 1, marginBottom: 6 }}>{f.label}</div>
+          <Input value={form[f.key]} onChange={v => setForm(p => ({...p, [f.key]:v}))} placeholder={f.placeholder} type={f.type||"text"} />
+        </div>
+      ))}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 11, color: T.text.secondary, letterSpacing: 1, marginBottom: 8 }}>PERÍODO</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          {["trimestre","semestre"].map(p => <button key={p} onClick={() => setForm(f=>({...f,period:p}))} style={{ flex:1, padding:"10px", borderRadius:12, background: form.period===p ? accentB+"22" : T.surface2, border:`1.5px solid ${form.period===p ? accentB : T.border}`, color: form.period===p ? accentB : T.text.secondary, fontWeight:600, fontSize:14, cursor:"pointer", textTransform:"capitalize" }}>{p}</button>)}
+        </div>
+      </div>
+      <Btn onClick={addBook} color={accentB} style={{ width:"100%", padding:"14px", fontSize:16 }}>Añadir libro</Btn>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 20px", paddingBottom: 100 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 24 }}>
+        <div><div style={{ fontSize: 12, color: T.text.secondary, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>Módulo</div><h2 style={{ margin: 0, fontSize: 26, color: T.text.primary, fontWeight: 800 }}>Lectura 📖</h2></div>
+        <Btn onClick={() => setView("add")} color={accentB} style={{ padding: "10px 16px" }}>+ Libro</Btn>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 24 }}>
+        <Card style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 800, color: accentB }}>{reading.length}</div><div style={{ fontSize: 12, color: T.text.secondary, marginTop: 4 }}>leyendo</div></Card>
+        <Card style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 800, color: accentB }}>{done.length}</div><div style={{ fontSize: 12, color: T.text.secondary, marginTop: 4 }}>terminados</div></Card>
+      </div>
+      {reading.length>0 && <>
+        <div style={{ fontSize: 11, color: T.text.secondary, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>Leyendo ahora</div>
+        {reading.map(book => <Card key={book.id} style={{ marginBottom: 12 }} onClick={() => { setSelected(book.id); setView("detail"); }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><div><div style={{ fontWeight: 700, fontSize: 15, color: T.text.primary }}>{book.title}</div>{book.author && <div style={{ fontSize: 12, color: T.text.secondary, marginTop: 2 }}>{book.author}</div>}</div><span style={{ fontSize: 20, fontWeight: 800, color: accentB }}>{book.pct}%</span></div>
+          <div style={{ height: 6, background: T.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width:`${book.pct}%`, background: accentB, borderRadius: 4 }} /></div>
+          <div style={{ marginTop: 6, fontSize: 11, color: T.text.muted }}>Objetivo: {book.period}</div>
+        </Card>)}
+      </>}
+      {done.length>0 && <>
+        <div style={{ fontSize: 11, color: T.text.secondary, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10, marginTop: 20 }}>Terminados</div>
+        {done.map(book => <Card key={book.id} style={{ marginBottom: 10, opacity: 0.75 }} onClick={() => { setSelected(book.id); setView("detail"); }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ color: accentB, fontSize: 18 }}>✓</span><div><div style={{ fontWeight: 600, fontSize: 14, color: T.text.primary }}>{book.title}</div>{book.author && <div style={{ fontSize: 12, color: T.text.secondary }}>{book.author}</div>}</div></div>
+        </Card>)}
+      </>}
+      {books.length===0 && <div style={{ textAlign: "center", padding: "60px 0", color: T.text.muted }}><div style={{ fontSize: 48, marginBottom: 12 }}>📚</div><div style={{ fontSize: 15 }}>Añade tu primer libro</div></div>}
+    </div>
+  );
+}
+
+// ── ROOT ──────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab] = useState("gym");
+  return (
+    <div style={{ background: T.bg, minHeight: "100vh", maxWidth: 430, margin: "0 auto", color: T.text.primary }}>
+      {tab==="gym"  && <GymModule />}
+      {tab==="med"  && <MedModule />}
+      {tab==="book" && <BookModule />}
+      <TabBar active={tab} onChange={setTab} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
